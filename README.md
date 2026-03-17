@@ -1,2 +1,15 @@
-# skillbridge-ai
-SkillBridge AI. One platform that turns students into innovators, connects education to community challenges, and uses AI to measure real impact. This is what practical education looks like
+9:41
+●●●
+🌱
+SkillBridge AI
+Sign in to start solving community challenges
+
+Sign In
+Create Account
+Email Address
+you@example.com
+Password
+Your password
+Sign In →
+─── or try demo mode ───
+Enter Demo Mode (No API Key)
