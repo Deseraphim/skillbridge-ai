@@ -1,0 +1,1105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>SkillBridge AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap" rel="stylesheet">
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet">
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
+<!-- Firebase -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, query, orderBy, limit, getDoc, setDoc }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+// ─── FIREBASE CONFIG ────────────────────────────────────
+// 🔧 REPLACE with your own Firebase project config from console.firebase.google.com
+const firebaseConfig = {
+  apiKey: "PASTE_YOUR_FIREBASE_API_KEY",
+  authDomain: "PASTE_YOUR_PROJECT.firebaseapp.com",
+  projectId: "PASTE_YOUR_PROJECT_ID",
+  storageBucket: "PASTE_YOUR_PROJECT.appspot.com",
+  messagingSenderId: "PASTE_SENDER_ID",
+  appId: "PASTE_APP_ID"
+};
+
+// ─── OPENAI API KEY ─────────────────────────────────────
+// 🔧 REPLACE with your key from platform.openai.com
+const OPENAI_KEY = "PASTE_YOUR_OPENAI_API_KEY";
+
+// ─── MAPBOX TOKEN ───────────────────────────────────────
+// 🔧 REPLACE with your token from mapbox.com
+const MAPBOX_TOKEN = "PASTE_YOUR_MAPBOX_TOKEN";
+
+// ─── INIT ───────────────────────────────────────────────
+const app   = initializeApp(firebaseConfig);
+const db    = getFirestore(app);
+const auth  = getAuth(app);
+
+// ─── STATE ──────────────────────────────────────────────
+let currentUser   = null;
+let currentScreen = "splash";
+let selectedChallenge = null;
+let lastEvaluation    = null;
+let lastImpactVision  = null;
+let mapInstance       = null;
+
+// ─── SAMPLE CHALLENGES ──────────────────────────────────
+const SAMPLE_CHALLENGES = [
+  { id:"c1", title:"Waste-to-Wealth Converter",      pillar:"Environment",       difficulty:"Medium", emoji:"♻️",  description:"Design a community system that turns household plastic waste into useful products or income. How would you collect, sort, and convert waste in your neighbourhood?" },
+  { id:"c2", title:"Mobile Savings Circle App",      pillar:"Financial",         difficulty:"Easy",   emoji:"💰",  description:"Many Nigerians use ajo/esusu savings groups. Design a digital solution that makes this safer, more transparent, and accessible to youth who have no bank account." },
+  { id:"c3", title:"Farmer Digital Literacy Hub",    pillar:"Digital",           difficulty:"Easy",   emoji:"🌾",  description:"Most Nigerian farmers cannot access market prices, weather forecasts, or government support online. Design a solution to bridge this gap using simple technology." },
+  { id:"c4", title:"Solar Borehole Monitor",         pillar:"Environment",       difficulty:"Hard",   emoji:"💧",  description:"Many solar-powered boreholes in rural Nigeria break down unnoticed for weeks. Design a low-cost monitoring system that alerts communities and technicians instantly." },
+  { id:"c5", title:"Youth Skills Marketplace",       pillar:"Community",         difficulty:"Medium", emoji:"🛠️",  description:"Young Nigerians with skills (coding, tailoring, repairs) struggle to find customers. Design a hyperlocal platform connecting skilled youth to households in their LGA." },
+  { id:"c6", title:"School Dropout Early Warning",   pillar:"Digital",           difficulty:"Hard",   emoji:"📚",  description:"Thousands of Nigerian children drop out annually due to financial pressure. Design an AI-powered early warning system for schools to identify and support at-risk students." },
+];
+
+// ─── SAMPLE LEADERBOARD ─────────────────────────────────
+const SAMPLE_LEADERS = [
+  { name:"Chisom Okafor",   school:"UNIZIK Awka",        state:"Anambra",  points:2840, projects:9 },
+  { name:"Ibrahim Musa",    school:"ABU Zaria",           state:"Kaduna",   points:2610, projects:8 },
+  { name:"Aisha Bello",     school:"UNILAG",              state:"Lagos",    points:2480, projects:7 },
+  { name:"Emeka Nwosu",     school:"UNN Nsukka",          state:"Enugu",    points:2200, projects:7 },
+  { name:"Abraham Emmanuel",school:"KASU Kaduna",         state:"Nasarawa", points:2050, projects:6 },
+  { name:"Fatima Suleiman", school:"BUK Kano",            state:"Kano",     points:1900, projects:6 },
+  { name:"David Obi",       school:"FUTO Owerri",         state:"Imo",      points:1750, projects:5 },
+  { name:"Ngozi Eze",       school:"Nassarawa Poly",      state:"Nasarawa", points:1600, projects:5 },
+  { name:"Usman Danladi",   school:"ATBU Bauchi",         state:"Bauchi",   points:1420, projects:4 },
+  { name:"Ruth Adeleke",    school:"OAU Ile-Ife",         state:"Osun",     points:1280, projects:4 },
+];
+
+// ─── MAP PROJECTS ───────────────────────────────────────
+const MAP_PROJECTS = [
+  { title:"Waste-to-Wealth Lagos",    name:"Chisom O.", state:"Lagos",    lng:3.3792,  lat:6.5244,  pillar:"Environment", score:9.2 },
+  { title:"Mobile Savings Kano",      name:"Fatima S.", state:"Kano",     lng:8.5264,  lat:11.9964, pillar:"Financial",   score:8.8 },
+  { title:"Farmer Hub Nasarawa",      name:"Abraham E.",state:"Nasarawa", lng:8.5569,  lat:8.4799,  pillar:"Digital",     score:9.0 },
+  { title:"Solar Borehole Borno",     name:"Ibrahim M.",state:"Borno",    lng:13.1571, lat:11.8333, pillar:"Environment", score:8.5 },
+  { title:"Youth Skills Abuja",       name:"David O.",  state:"FCT",      lng:7.4898,  lat:9.0579,  pillar:"Community",   score:8.7 },
+  { title:"Dropout Alert Enugu",      name:"Emeka N.",  state:"Enugu",    lng:7.4951,  lat:6.4584,  pillar:"Digital",     score:8.3 },
+  { title:"Clean Energy Ogun",        name:"Ruth A.",   state:"Ogun",     lng:3.3500,  lat:6.9980,  pillar:"Environment", score:8.1 },
+  { title:"Fintech Youths Rivers",    name:"Ngozi E.",  state:"Rivers",   lng:6.9980,  lat:4.8156,  pillar:"Financial",   score:7.9 },
+];
+
+// ─── OPENAI CALL ────────────────────────────────────────
+async function callOpenAI(systemPrompt, userPrompt) {
+  if (OPENAI_KEY.startsWith("PASTE")) {
+    return null; // Demo mode — will use simulated response
+  }
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": OPENAI_KEY, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 600,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userPrompt }]
+    })
+  });
+  const data = await res.json();
+  return data.content?.[0]?.text || null;
+}
+
+async function evaluateProject(title, description) {
+  const system = "You are an AI that evaluates Nigerian student innovation projects. Always respond with valid JSON only, no markdown.";
+  const user = `Evaluate this student innovation project:\nTitle: ${title}\nDescription: ${description}\n\nReturn JSON: {"creativity_score": <1-10>, "feasibility_score": <1-10>, "impact_score": <1-10>, "overall_score": <1-10>, "feedback": "<2 sentences of encouraging feedback>", "points_earned": <number 100-300>, "badge": "<badge name like Innovation Star>"}`;
+  const raw = await callOpenAI(system, user);
+  if (!raw) {
+    // Demo mode simulation
+    const s1 = Math.floor(Math.random()*3)+7;
+    const s2 = Math.floor(Math.random()*3)+7;
+    const s3 = Math.floor(Math.random()*3)+7;
+    return { creativity_score:s1, feasibility_score:s2, impact_score:s3,
+      overall_score: ((s1+s2+s3)/3).toFixed(1),
+      feedback: `Your project "${title}" shows remarkable innovation and deep understanding of community needs in Nigeria. The approach is practical, scalable, and directly addresses a real problem — this is exactly the kind of thinking that drives national development.`,
+      points_earned: (s1+s2+s3)*10+50, badge:"Community Champion" };
+  }
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+async function getImpactVision(title, description) {
+  const system = "You are ImpactVision AI, predicting real-world impact of Nigerian student innovation projects. Always respond with valid JSON only.";
+  const user = `Predict the real-world impact of this project in Nigeria:\nTitle: ${title}\nDescription: ${description}\n\nReturn JSON: {"environmental":{"score":<1-10>,"description":"<1 sentence>","icon":"🌿"}, "economic":{"score":<1-10>,"description":"<1 sentence>","icon":"💹"}, "social":{"score":<1-10>,"description":"<1 sentence>","icon":"🤝"}, "recommendation":"<1 actionable sentence>", "reach":"<e.g. 5,000 people across 3 LGAs>"}`;
+  const raw = await callOpenAI(system, user);
+  if (!raw) {
+    return {
+      environmental: { score:8, description:"Could divert significant waste from landfills, reducing pollution in affected communities.", icon:"🌿" },
+      economic:      { score:9, description:"Generates sustainable income for youth while reducing household waste management costs.", icon:"💹" },
+      social:        { score:8, description:"Builds community cohesion and positions youth as active problem-solvers rather than bystanders.", icon:"🤝" },
+      recommendation:"Partner with your local government waste management agency to pilot this in 2 wards within 3 months.",
+      reach:"Estimated 8,000 people across 4 communities in your state"
+    };
+  }
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+// ─── SCREEN ROUTER ──────────────────────────────────────
+function showScreen(id) {
+  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+  const el = document.getElementById(id);
+  if (el) { el.classList.add("active"); el.scrollTop = 0; }
+  currentScreen = id;
+  updateBottomNav(id);
+  if (id === "map") initMap();
+}
+
+function updateBottomNav(id) {
+  document.querySelectorAll(".bnav-item").forEach(b => {
+    b.classList.toggle("active", b.dataset.screen === id);
+  });
+}
+
+// ─── AUTH ────────────────────────────────────────────────
+async function doLogin(email, password) {
+  if (firebaseConfig.apiKey.startsWith("PASTE")) {
+    // Demo mode
+    currentUser = { uid:"demo123", email, displayName: email.split("@")[0] };
+    loadDashboard();
+    showScreen("dashboard");
+    return;
+  }
+  try {
+    const cred = await signInWithEmailAndPassword(auth, email, password);
+    currentUser = cred.user;
+    loadDashboard();
+    showScreen("dashboard");
+  } catch (e) {
+    setErr("login-err", e.message);
+  }
+}
+
+async function doSignup(name, email, password, school, state) {
+  if (firebaseConfig.apiKey.startsWith("PASTE")) {
+    currentUser = { uid:"demo123", email, displayName: name };
+    await saveDemoUser(name, email, school, state);
+    loadDashboard();
+    showScreen("dashboard");
+    return;
+  }
+  try {
+    const cred = await createUserWithEmailAndPassword(auth, email, password);
+    currentUser = cred.user;
+    await setDoc(doc(db, "users", cred.user.uid), { name, email, school, state, points:0, projects:0, createdAt: new Date() });
+    loadDashboard();
+    showScreen("dashboard");
+  } catch (e) {
+    setErr("signup-err", e.message);
+  }
+}
+
+function saveDemoUser(name, email, school, state) {
+  localStorage.setItem("sb_user", JSON.stringify({ name, email, school, state, points:0, projects:0 }));
+}
+function getDemoUser() {
+  const u = localStorage.getItem("sb_user");
+  return u ? JSON.parse(u) : { name:"Abraham E.", email:"", school:"KASU", state:"Nasarawa", points:2050, projects:6 };
+}
+
+// ─── DASHBOARD ──────────────────────────────────────────
+function loadDashboard() {
+  const user = getDemoUser();
+  const name = user.name || currentUser?.displayName || currentUser?.email?.split("@")[0] || "Student";
+  setText("dash-name", name.split(" ")[0]);
+  setText("dash-points", user.points || 2050);
+  setText("dash-projects", user.projects || 6);
+  setText("dash-rank", "#5");
+  renderChallenges();
+}
+
+function renderChallenges() {
+  const container = document.getElementById("challenge-list");
+  if (!container) return;
+  container.innerHTML = SAMPLE_CHALLENGES.slice(0,3).map(c => `
+    <div class="challenge-card" onclick="openChallenge('${c.id}')">
+      <div class="challenge-banner" style="background:${pillarGrad(c.pillar)}">
+        <span style="font-size:42px;z-index:1">${c.emoji}</span>
+      </div>
+      <div class="ch-body">
+        <div class="ch-meta">
+          <span class="chip chip-${pillarColor(c.pillar)}">${c.pillar}</span>
+          <span class="chip chip-${diffColor(c.difficulty)}">${c.difficulty}</span>
+        </div>
+        <div class="ch-title">${c.title}</div>
+        <div class="ch-desc">${c.description.substring(0,80)}…</div>
+        <button class="btn btn-primary" style="margin-top:12px;padding:10px" onclick="event.stopPropagation();openChallenge('${c.id}')">Start Challenge →</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+function openChallenge(id) {
+  selectedChallenge = SAMPLE_CHALLENGES.find(c => c.id === id);
+  if (!selectedChallenge) return;
+  document.getElementById("ch-emoji").textContent    = selectedChallenge.emoji;
+  document.getElementById("ch-pillar").textContent   = selectedChallenge.pillar;
+  document.getElementById("ch-title").textContent    = selectedChallenge.title;
+  document.getElementById("ch-diff").textContent     = selectedChallenge.difficulty;
+  document.getElementById("ch-desc").textContent     = selectedChallenge.description;
+  showScreen("challenge");
+}
+
+// ─── ALL CHALLENGES ─────────────────────────────────────
+function loadAllChallenges() {
+  const container = document.getElementById("all-challenges");
+  if (!container) return;
+  container.innerHTML = SAMPLE_CHALLENGES.map(c => `
+    <div class="challenge-card" onclick="openChallenge('${c.id}')">
+      <div class="challenge-banner" style="background:${pillarGrad(c.pillar)}">
+        <span style="font-size:42px;z-index:1">${c.emoji}</span>
+      </div>
+      <div class="ch-body">
+        <div class="ch-meta">
+          <span class="chip chip-${pillarColor(c.pillar)}">${c.pillar}</span>
+          <span class="chip chip-${diffColor(c.difficulty)}">${c.difficulty}</span>
+        </div>
+        <div class="ch-title">${c.title}</div>
+        <div class="ch-desc">${c.description.substring(0,90)}…</div>
+        <button class="btn btn-primary" style="margin-top:10px;padding:10px" onclick="event.stopPropagation();openChallenge('${c.id}')">Start Challenge →</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+// ─── SUBMISSION ─────────────────────────────────────────
+async function submitProject() {
+  const title = document.getElementById("sub-title").value.trim();
+  const desc  = document.getElementById("sub-desc").value.trim();
+  const state = document.getElementById("sub-state").value;
+  if (!title || !desc || !state) { setErr("sub-err","Please fill all fields."); return; }
+
+  setErr("sub-err","");
+  document.getElementById("sub-btn").disabled = true;
+  document.getElementById("sub-btn").textContent = "Submitting…";
+  showScreen("evaluating");
+
+  // Fake progress animation
+  let pct = 0;
+  const bar = document.getElementById("eval-bar");
+  const msg = document.getElementById("eval-msg");
+  const msgs = ["Reading your project…","Analysing creativity…","Checking feasibility…","Measuring community impact…","Generating feedback…","Almost done…"];
+  const interval = setInterval(() => {
+    pct = Math.min(pct + Math.random()*18, 95);
+    if (bar) bar.style.width = pct + "%";
+    if (msg) msg.textContent = msgs[Math.floor(pct/18)] || msgs[5];
+  }, 700);
+
+  const [evalResult, impactResult] = await Promise.all([
+    evaluateProject(title, desc),
+    getImpactVision(title, desc)
+  ]);
+
+  clearInterval(interval);
+  if (bar) bar.style.width = "100%";
+
+  lastEvaluation   = evalResult;
+  lastImpactVision = impactResult;
+
+  // Save to Firebase / localStorage
+  const project = { title, description: desc, state, challengeId: selectedChallenge?.id,
+    challengeTitle: selectedChallenge?.title, evaluation: evalResult, impact: impactResult,
+    createdAt: new Date().toISOString() };
+  const projects = JSON.parse(localStorage.getItem("sb_projects") || "[]");
+  projects.unshift(project);
+  localStorage.setItem("sb_projects", JSON.stringify(projects));
+
+  // Update points
+  const user = getDemoUser();
+  user.points = (user.points || 0) + (evalResult?.points_earned || 150);
+  user.projects = (user.projects || 0) + 1;
+  localStorage.setItem("sb_user", JSON.stringify(user));
+
+  setTimeout(() => {
+    showEvaluation(evalResult);
+    showScreen("evaluation");
+  }, 600);
+
+  document.getElementById("sub-btn").disabled = false;
+  document.getElementById("sub-btn").textContent = "Submit for AI Evaluation";
+}
+
+function showEvaluation(ev) {
+  if (!ev) return;
+  const animate = (id, val, max=10) => {
+    const el = document.getElementById(id);
+    if (el) { el.style.width = "0%"; setTimeout(() => { el.style.width = ((val/max)*100)+"%"; }, 200); }
+  };
+  setText("ev-creativity",   ev.creativity_score);
+  setText("ev-feasibility",  ev.feasibility_score);
+  setText("ev-impact",       ev.impact_score);
+  setText("ev-overall",      ev.overall_score);
+  setText("ev-feedback",     ev.feedback);
+  setText("ev-points",       "+" + ev.points_earned + " pts");
+  setText("ev-badge",        "🏆 " + (ev.badge || "Innovation Star"));
+  animate("ev-bar-creativity",  ev.creativity_score);
+  animate("ev-bar-feasibility", ev.feasibility_score);
+  animate("ev-bar-impact",      ev.impact_score);
+}
+
+// ─── IMPACTVISION ────────────────────────────────────────
+function showImpactVision() {
+  const iv = lastImpactVision;
+  if (!iv) { showScreen("impactvision"); return; }
+  setText("iv-env-score",   iv.environmental?.score + "/10");
+  setText("iv-env-desc",    iv.environmental?.description);
+  setText("iv-eco-score",   iv.economic?.score + "/10");
+  setText("iv-eco-desc",    iv.economic?.description);
+  setText("iv-soc-score",   iv.social?.score + "/10");
+  setText("iv-soc-desc",    iv.social?.description);
+  setText("iv-reach",       iv.reach);
+  setText("iv-rec",         iv.recommendation);
+  const envBar = document.getElementById("iv-env-bar");
+  const ecoBar = document.getElementById("iv-eco-bar");
+  const socBar = document.getElementById("iv-soc-bar");
+  setTimeout(() => {
+    if (envBar) envBar.style.width = (iv.environmental?.score*10)+"%";
+    if (ecoBar) ecoBar.style.width = (iv.economic?.score*10)+"%";
+    if (socBar) socBar.style.width = (iv.social?.score*10)+"%";
+  }, 300);
+  showScreen("impactvision");
+}
+
+// ─── MAP ─────────────────────────────────────────────────
+function initMap() {
+  if (mapInstance) return;
+  if (MAPBOX_TOKEN.startsWith("PASTE")) {
+    document.getElementById("map-container").innerHTML = `
+      <div style="width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#1e3329;gap:16px;padding:20px">
+        <div style="font-size:48px">🗺️</div>
+        <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:700;color:#f8faf9;text-align:center">Impact Map</div>
+        <div style="font-size:13px;color:#8aab98;text-align:center;line-height:1.6">Add your Mapbox token to see all ${MAP_PROJECTS.length} student innovation projects pinned across Nigeria in real time.</div>
+        <div style="background:#2c6e49;border-radius:12px;padding:16px;width:100%">
+          ${MAP_PROJECTS.map(p=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.08);font-size:12px">
+            <div><div style="color:#f8faf9;font-weight:600">${p.title}</div><div style="color:#8aab98">${p.state} · ${p.name}</div></div>
+            <div style="color:#f4a261;font-weight:700">${p.score}/10</div>
+          </div>`).join("")}
+        </div>
+      </div>`;
+    return;
+  }
+  mapboxgl.accessToken = MAPBOX_TOKEN;
+  mapInstance = new mapboxgl.Map({
+    container: "map-container",
+    style: "mapbox://styles/mapbox/dark-v11",
+    center: [8.6753, 9.0820],
+    zoom: 5
+  });
+  mapInstance.on("load", () => {
+    MAP_PROJECTS.forEach(p => {
+      const el = document.createElement("div");
+      el.className = "map-pin";
+      el.style.cssText = `width:32px;height:32px;border-radius:50%;border:3px solid white;display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer;background:${pillarColor2(p.pillar)};box-shadow:0 4px 12px rgba(0,0,0,0.4)`;
+      el.textContent = pillarEmoji(p.pillar);
+      new mapboxgl.Marker(el).setLngLat([p.lng, p.lat])
+        .setPopup(new mapboxgl.Popup({ offset:25 }).setHTML(
+          `<div style="font-family:'DM Sans',sans-serif;padding:4px">
+            <strong>${p.title}</strong><br>
+            <span style="color:#666">${p.name} · ${p.state}</span><br>
+            <span style="color:#2c6e49;font-weight:700">Score: ${p.score}/10</span>
+          </div>`
+        )).addTo(mapInstance);
+    });
+  });
+}
+
+// ─── LEADERBOARD ─────────────────────────────────────────
+function loadLeaderboard() {
+  const container = document.getElementById("lb-list");
+  if (!container) return;
+  container.innerHTML = SAMPLE_LEADERS.map((u,i) => `
+    <div class="lb-row ${i<3?'lb-top':''}">
+      <div class="lb-rank ${i===0?'gold':i===1?'silver':i===2?'bronze':''}">
+        ${i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1)}
+      </div>
+      <div class="lb-avatar">${u.name.split(" ").map(n=>n[0]).join("").substring(0,2)}</div>
+      <div class="lb-info">
+        <div class="lb-name">${u.name} ${u.state==="Nasarawa"?'⭐':''}</div>
+        <div class="lb-school">${u.school} · ${u.state}</div>
+      </div>
+      <div class="lb-score">
+        <div class="lb-pts">${u.points.toLocaleString()}</div>
+        <div class="lb-proj">${u.projects} projects</div>
+      </div>
+    </div>
+  `).join("");
+}
+
+// ─── UTILS ──────────────────────────────────────────────
+function setText(id, val) { const el=document.getElementById(id); if(el) el.textContent=val; }
+function setErr(id, msg)  { const el=document.getElementById(id); if(el) el.textContent=msg; }
+function pillarGrad(p) {
+  return p==="Environment"?"linear-gradient(135deg,#1a4731,#2c6e49)":
+         p==="Financial"  ?"linear-gradient(135deg,#7b3f00,#c77d00)":
+         p==="Digital"    ?"linear-gradient(135deg,#1a3f5c,#1a7aa0)":
+                           "linear-gradient(135deg,#3d1a5c,#7b3f8a)";
+}
+function pillarColor(p)  { return p==="Environment"?"green":p==="Financial"?"orange":p==="Digital"?"blue":"purple"; }
+function pillarColor2(p) { return p==="Environment"?"#2c6e49":p==="Financial"?"#c77d00":p==="Digital"?"#1a7aa0":"#7b3f8a"; }
+function pillarEmoji(p)  { return p==="Environment"?"🌿":p==="Financial"?"💰":p==="Digital"?"💻":"🤝"; }
+function diffColor(d)    { return d==="Easy"?"green":d==="Medium"?"orange":"red"; }
+
+// ─── EXPOSE GLOBALS ─────────────────────────────────────
+window.showScreen       = showScreen;
+window.openChallenge    = openChallenge;
+window.loadAllChallenges= loadAllChallenges;
+window.loadLeaderboard  = loadLeaderboard;
+window.submitProject    = submitProject;
+window.showImpactVision = showImpactVision;
+window.doLogin          = doLogin;
+window.doSignup         = doSignup;
+window.loadDashboard    = loadDashboard;
+window.goBack           = (s) => showScreen(s);
+window.doLogout         = async () => {
+  if (!firebaseConfig.apiKey.startsWith("PASTE")) await signOut(auth);
+  currentUser = null; showScreen("login");
+};
+
+// ─── SPLASH AUTO-ADVANCE ─────────────────────────────────
+window.addEventListener("load", () => {
+  setTimeout(() => {
+    if (currentScreen === "splash") showScreen("login");
+  }, 2500);
+});
+
+window.handleLoginSubmit = () => {
+  const email    = document.getElementById("login-email").value;
+  const password = document.getElementById("login-pass").value;
+  if (!email || !password) { setErr("login-err","Enter your email and password."); return; }
+  doLogin(email, password);
+};
+
+window.handleSignupSubmit = () => {
+  const name     = document.getElementById("su-name").value;
+  const email    = document.getElementById("su-email").value;
+  const password = document.getElementById("su-pass").value;
+  const school   = document.getElementById("su-school").value;
+  const state    = document.getElementById("su-state").value;
+  if (!name||!email||!password||!school||!state) { setErr("signup-err","Fill all fields."); return; }
+  doSignup(name, email, password, school, state);
+};
+</script>
+
+<style>
+:root{
+  --dark:#0e1f18;--card:#1e3329;--card2:#243d2f;
+  --dg:#1a4731;--mg:#2c6e49;--lg:#52b788;--pale:#d8efdc;
+  --acc:#f4a261;--white:#f8faf9;--muted:#8aab98;--txt:#1c1c1c;
+  --r:18px;--rs:12px;
+  --fh:'Syne',sans-serif;--fb:'DM Sans',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;background:#070f0a;display:flex;align-items:center;justify-content:center;font-family:var(--fb)}
+
+/* ── Phone shell ── */
+.phone{
+  width:390px;max-width:100vw;height:844px;max-height:100dvh;
+  background:var(--dark);border-radius:44px;overflow:hidden;position:relative;
+  border:2px solid #2c6e49;
+  box-shadow:0 60px 120px rgba(0,0,0,.8),inset 0 0 0 1px rgba(255,255,255,.04);
+}
+@media(max-width:420px){.phone{border-radius:0;border:none;width:100vw;height:100dvh}}
+
+/* ── Screens ── */
+.screen{display:none;flex-direction:column;width:100%;height:100%;overflow-y:auto;overflow-x:hidden;position:absolute;top:0;left:0;scrollbar-width:none}
+.screen::-webkit-scrollbar{display:none}
+.screen.active{display:flex}
+.scroll-pad{padding-bottom:80px}
+
+/* ── Status bar ── */
+.sbar{display:flex;justify-content:space-between;padding:10px 22px 0;font-size:11px;font-weight:600;color:var(--muted);flex-shrink:0}
+
+/* ── Bottom nav ── */
+.bnav{position:absolute;bottom:0;left:0;right:0;height:72px;background:var(--card);border-top:1px solid rgba(82,183,136,.15);display:flex;align-items:center;justify-content:space-around;padding:0 4px 10px;z-index:100}
+.bnav-item{display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;padding:6px 10px;border-radius:12px;transition:all .2s;flex:1}
+.bnav-item.active{background:rgba(44,110,73,.4)}
+.bnav-item svg{width:22px;height:22px;stroke:var(--muted);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;transition:stroke .2s}
+.bnav-item.active svg{stroke:var(--lg)}
+.bnav-item span{font-size:9px;font-weight:500;color:var(--muted);transition:color .2s}
+.bnav-item.active span{color:var(--lg)}
+
+/* ── Components ── */
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:14px;border-radius:var(--rs);font-family:var(--fh);font-size:14px;font-weight:700;cursor:pointer;border:none;transition:all .18s;letter-spacing:.3px}
+.btn-primary{background:var(--lg);color:var(--dark)}
+.btn-primary:hover{filter:brightness(1.1)}
+.btn-secondary{background:rgba(13,42,24,0.55);color:#95d5b2;border:1.5px solid rgba(82,183,136,0.3)}
+.btn-accent{background:linear-gradient(135deg,#d06830,var(--acc));color:#1a0800}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;padding:3px 9px;border-radius:999px;letter-spacing:.4px}
+.chip-green{background:rgba(82,183,136,.15);color:var(--lg);border:1px solid rgba(82,183,136,.3)}
+.chip-orange{background:rgba(244,162,97,.15);color:var(--acc);border:1px solid rgba(244,162,97,.3)}
+.chip-blue{background:rgba(76,201,240,.15);color:#4cc9f0;border:1px solid rgba(76,201,240,.3)}
+.chip-red{background:rgba(231,111,81,.15);color:#e76f51;border:1px solid rgba(231,111,81,.3)}
+.chip-purple{background:rgba(199,125,255,.15);color:#c77dff;border:1px solid rgba(199,125,255,.3)}
+
+.card{background:var(--card);border-radius:var(--r);padding:16px;border:1px solid rgba(82,183,136,.1)}
+
+.score-track{height:8px;background:rgba(255,255,255,.08);border-radius:4px;overflow:hidden;margin-top:6px}
+.score-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--mg),var(--lg));transition:width 1s ease;width:0%}
+
+.input{background:var(--card);border:1.5px solid rgba(82,183,136,.18);border-radius:var(--rs);padding:13px 15px;color:var(--white);font-family:var(--fb);font-size:14px;outline:none;width:100%;transition:border-color .2s}
+.input:focus{border-color:var(--lg)}
+.input::placeholder{color:rgba(138,171,152,.45)}
+select.input option{background:var(--dark);color:var(--white)}
+
+.err{color:#e76f51;font-size:12px;margin-top:4px;min-height:16px}
+.lbl{font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px}
+
+/* ── Splash ── */
+#splash{background:radial-gradient(ellipse at 50% 30%,#1a4731 0%,#070f0a 70%);justify-content:center;align-items:center;gap:0}
+.sp-logo{display:flex;flex-direction:column;align-items:center;gap:18px}
+.sp-icon{width:90px;height:90px;border-radius:26px;background:linear-gradient(135deg,var(--mg),var(--lg));display:flex;align-items:center;justify-content:center;font-size:44px;box-shadow:0 24px 48px rgba(44,110,73,.5);animation:float 3s ease-in-out infinite}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+.sp-name{font-family:var(--fh);font-size:32px;font-weight:800;color:var(--white)}
+.sp-name b{color:var(--lg)}
+.sp-tag{font-size:13px;color:var(--muted);text-align:center;max-width:200px;line-height:1.6;margin-top:-6px}
+.sp-loader{display:flex;gap:8px;margin-top:48px}
+.sp-dot{width:8px;height:8px;border-radius:50%;background:rgba(82,183,136,.25)}
+.sp-dot:nth-child(2){background:var(--lg);animation:blink 1.4s infinite .2s}
+.sp-dot:nth-child(3){animation:blink 1.4s infinite .4s}
+@keyframes blink{0%,100%{background:rgba(82,183,136,.25)}50%{background:var(--lg)}}
+
+/* ── Login / Signup ── */
+#login,#signup{background:var(--dark)}
+.auth-hero{background:linear-gradient(180deg,var(--dg) 0%,var(--dark) 100%);padding:56px 24px 28px;text-align:center}
+.auth-hero h1{font-family:var(--fh);font-size:22px;font-weight:800;color:var(--white);margin-top:10px}
+.auth-hero p{font-size:13px;color:var(--muted);margin-top:5px}
+.auth-form{padding:24px;display:flex;flex-direction:column;gap:14px}
+.auth-tabs{display:flex;gap:0;background:var(--card);border-radius:var(--rs);padding:4px;margin-bottom:4px}
+.auth-tab{flex:1;padding:10px;text-align:center;border-radius:10px;font-family:var(--fh);font-size:13px;font-weight:700;cursor:pointer;color:var(--muted);transition:all .2s}
+.auth-tab.active{background:var(--mg);color:var(--white)}
+
+/* ── Dashboard ── */
+#dashboard{background:var(--dark)}
+.dash-head{padding:14px 20px 0;display:flex;justify-content:space-between;align-items:center}
+.dash-greet{font-size:12px;color:var(--muted)}
+.dash-nm{font-family:var(--fh);font-size:20px;font-weight:800;color:var(--white)}
+.avatar{width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,var(--mg),var(--lg));display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;color:var(--dark);font-family:var(--fh)}
+.stats{display:flex;gap:10px;padding:14px 16px}
+.stat{flex:1;background:var(--card);border-radius:var(--rs);padding:12px;text-align:center;border:1px solid rgba(82,183,136,.1)}
+.stat-n{font-family:var(--fh);font-size:22px;font-weight:800;color:var(--white)}
+.stat-n.g{color:var(--lg)}.stat-n.o{color:var(--acc)}
+.stat-l{font-size:9px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.5px}
+.sec-hd{display:flex;justify-content:space-between;align-items:center;padding:0 16px 10px}
+.sec-title{font-family:var(--fh);font-size:14px;font-weight:700;color:var(--white)}
+.sec-link{font-size:11px;color:var(--lg);font-weight:600;cursor:pointer}
+
+/* ── Challenge cards ── */
+.challenge-card{background:var(--card);border-radius:var(--r);margin:0 16px 14px;overflow:hidden;border:1px solid rgba(82,183,136,.12);cursor:pointer;transition:transform .15s}
+.challenge-card:active{transform:scale(.98)}
+.challenge-banner{height:90px;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.challenge-banner::after{content:'';position:absolute;inset:0;background:linear-gradient(135deg,transparent 40%,rgba(0,0,0,.25))}
+.ch-body{padding:14px}
+.ch-meta{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.ch-title{font-family:var(--fh);font-size:15px;font-weight:700;color:var(--white);line-height:1.3;margin-bottom:5px}
+.ch-desc{font-size:12px;color:var(--muted);line-height:1.5}
+
+/* ── Challenge detail ── */
+#challenge{background:var(--dark)}
+.ch-hero{height:200px;display:flex;flex-direction:column;justify-content:flex-end;padding:20px;position:relative;overflow:hidden}
+.back{position:absolute;top:52px;left:16px;width:36px;height:36px;background:rgba(0,0,0,.35);border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--white);font-size:20px;z-index:2}
+.ch-big{font-family:var(--fh);font-size:20px;font-weight:800;color:var(--white);line-height:1.3;margin-top:8px}
+
+/* ── Submission ── */
+#submission{background:var(--dark)}
+
+/* ── Evaluating ── */
+#evaluating{background:radial-gradient(ellipse at 50% 40%,#1a4731 0%,#070f0a 80%);justify-content:center;align-items:center;text-align:center;padding:32px}
+.eval-anim{font-size:64px;animation:spin 2s linear infinite}
+@keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
+.eval-prog{width:100%;max-width:280px;height:6px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden;margin-top:24px}
+.eval-prog-fill{height:100%;background:linear-gradient(90deg,var(--mg),var(--lg));border-radius:3px;width:0%;transition:width .5s ease}
+
+/* ── Evaluation ── */
+#evaluation{background:var(--dark)}
+.ev-top{padding:16px 20px;text-align:center;background:linear-gradient(180deg,var(--dg),var(--dark))}
+.ev-score-big{font-family:var(--fh);font-size:56px;font-weight:800;color:var(--lg)}
+.ev-body{padding:16px}
+.score-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.score-lbl{font-size:12px;color:var(--muted)}
+.score-val{font-family:var(--fh);font-size:14px;font-weight:700;color:var(--white)}
+.badge-pill{background:linear-gradient(135deg,var(--acc),#e76f51);border-radius:999px;padding:8px 20px;font-family:var(--fh);font-size:13px;font-weight:700;color:var(--dark);display:inline-block;margin-top:10px}
+.pts-pill{background:rgba(82,183,136,.15);border:1px solid rgba(82,183,136,.3);border-radius:999px;padding:6px 16px;font-family:var(--fh);font-size:14px;font-weight:700;color:var(--lg);display:inline-block}
+
+/* ── ImpactVision ── */
+#impactvision{background:var(--dark)}
+.iv-header{background:linear-gradient(160deg,#0d2d1a,var(--dark));padding:60px 20px 24px;text-align:center}
+.iv-title{font-family:var(--fh);font-size:22px;font-weight:800;color:var(--white)}
+.iv-sub{font-size:13px;color:var(--muted);margin-top:6px}
+.iv-card{background:var(--card);border-radius:var(--r);padding:18px;margin:0 16px 14px;border:1px solid rgba(82,183,136,.12)}
+.iv-card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.iv-icon{font-size:28px}
+.iv-score{font-family:var(--fh);font-size:22px;font-weight:800;color:var(--acc)}
+.iv-label{font-family:var(--fh);font-size:14px;font-weight:700;color:var(--white)}
+.iv-desc{font-size:12px;color:var(--muted);line-height:1.6;margin-top:4px}
+.reach-card{background:linear-gradient(135deg,var(--dg),var(--mg));border-radius:var(--r);padding:18px;margin:0 16px 14px;text-align:center}
+.reach-num{font-family:var(--fh);font-size:20px;font-weight:800;color:var(--white);margin:4px 0}
+.reach-lbl{font-size:11px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.6px}
+.rec-card{background:rgba(244,162,97,.08);border:1px solid rgba(244,162,97,.25);border-radius:var(--r);padding:16px;margin:0 16px 16px}
+
+/* ── Map ── */
+#map{background:var(--dark)}
+#map-container{flex:1;min-height:500px}
+
+/* ── Leaderboard ── */
+#leaderboard{background:var(--dark)}
+.lb-hero{background:linear-gradient(160deg,var(--dg),var(--dark));padding:56px 20px 20px;text-align:center}
+.lb-title{font-family:var(--fh);font-size:22px;font-weight:800;color:var(--white)}
+.lb-sub{font-size:12px;color:var(--muted);margin-top:4px}
+.lb-row{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid rgba(82,183,136,.07);transition:background .15s;cursor:default}
+.lb-top{background:rgba(82,183,136,.06)}
+.lb-rank{width:32px;text-align:center;font-family:var(--fh);font-size:14px;font-weight:700;color:var(--muted)}
+.lb-rank.gold{color:#ffd166;font-size:20px}.lb-rank.silver{color:#b0bec5;font-size:20px}.lb-rank.bronze{color:#cd7f32;font-size:20px}
+.lb-avatar{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--mg),var(--lg));display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--dark);font-family:var(--fh);flex-shrink:0}
+.lb-info{flex:1}
+.lb-name{font-size:13px;font-weight:600;color:var(--white)}
+.lb-school{font-size:11px;color:var(--muted);margin-top:1px}
+.lb-score{text-align:right}
+.lb-pts{font-family:var(--fh);font-size:15px;font-weight:800;color:var(--lg)}
+.lb-proj{font-size:10px;color:var(--muted);margin-top:1px}
+
+/* ── Challenges screen ── */
+#challenges{background:var(--dark)}
+.ch-screen-head{background:linear-gradient(180deg,var(--dg),var(--dark));padding:56px 20px 16px}
+.ch-screen-title{font-family:var(--fh);font-size:22px;font-weight:800;color:var(--white)}
+
+/* ── Profile ── */
+#profile{background:var(--dark);padding:0}
+.prof-hero{background:linear-gradient(160deg,var(--dg),var(--dark));padding:56px 20px 24px;text-align:center}
+.prof-avatar-big{width:80px;height:80px;border-radius:22px;background:linear-gradient(135deg,var(--mg),var(--lg));display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:800;color:var(--dark);font-family:var(--fh);margin:0 auto 12px}
+.prof-name{font-family:var(--fh);font-size:20px;font-weight:800;color:var(--white)}
+.prof-state{font-size:13px;color:var(--muted);margin-top:3px}
+.prof-body{padding:20px;display:flex;flex-direction:column;gap:14px}
+.prof-row{display:flex;justify-content:space-between;align-items:center;padding:14px;background:var(--card);border-radius:var(--rs);border:1px solid rgba(82,183,136,.1)}
+.prof-row-label{font-size:13px;color:var(--muted)}
+.prof-row-val{font-family:var(--fh);font-size:14px;font-weight:700;color:var(--white)}
+</style>
+</head>
+<body>
+<div class="phone">
+
+<!-- ── SPLASH ─────────────────────────────────────────── -->
+<div class="screen active" id="splash">
+  <div class="sp-logo">
+    <div class="sp-icon">🌱</div>
+    <div class="sp-name">Skill<b>Bridge</b> AI</div>
+    <div class="sp-tag">Connecting Students to Real Community Challenges</div>
+    <div class="sp-loader">
+      <span class="sp-dot"></span><span class="sp-dot"></span><span class="sp-dot"></span>
+    </div>
+  </div>
+</div>
+
+<!-- ── LOGIN / SIGNUP ──────────────────────────────────── -->
+<div class="screen" id="login">
+  <div class="sbar"><span>9:41</span><span>●●●</span></div>
+  <div class="auth-hero">
+    <div style="font-size:40px">🌱</div>
+    <h1>SkillBridge AI</h1>
+    <p>Sign in to start solving community challenges</p>
+  </div>
+  <div class="auth-form">
+    <div class="auth-tabs">
+      <div class="auth-tab active" onclick="showScreen('login')">Sign In</div>
+      <div class="auth-tab" onclick="showScreen('signup')">Create Account</div>
+    </div>
+    <div class="form-group">
+      <div class="lbl">Email Address</div>
+      <input id="login-email" class="input" type="email" placeholder="you@example.com">
+    </div>
+    <div class="form-group">
+      <div class="lbl">Password</div>
+      <input id="login-pass" class="input" type="password" placeholder="Your password">
+    </div>
+    <div class="err" id="login-err"></div>
+    <button class="btn btn-primary" onclick="handleLoginSubmit()">Sign In →</button>
+    <div style="text-align:center;font-size:11px;color:var(--muted)">
+      ─── or try demo mode ───
+    </div>
+    <button class="btn btn-secondary" onclick="doLogin('demo@skillbridge.ng','demo1234')">Enter Demo Mode (No API Key)</button>
+  </div>
+</div>
+
+<!-- ── SIGN UP ─────────────────────────────────────────── -->
+<div class="screen" id="signup">
+  <div class="sbar"><span>9:41</span><span>●●●</span></div>
+  <div class="auth-hero" style="padding:40px 24px 20px">
+    <div style="font-size:36px">🌱</div>
+    <h1>Create Account</h1>
+    <p>Join the innovation network</p>
+  </div>
+  <div class="auth-form" style="gap:11px">
+    <div class="auth-tabs">
+      <div class="auth-tab" onclick="showScreen('login')">Sign In</div>
+      <div class="auth-tab active" onclick="showScreen('signup')">Create Account</div>
+    </div>
+    <div class="lbl">Full Name</div>
+    <input id="su-name" class="input" placeholder="Abraham Emmanuel">
+    <div class="lbl">Email</div>
+    <input id="su-email" class="input" type="email" placeholder="you@example.com">
+    <div class="lbl">Password</div>
+    <input id="su-pass" class="input" type="password" placeholder="Min. 6 characters">
+    <div class="lbl">School / University</div>
+    <input id="su-school" class="input" placeholder="e.g. KASU, UNILAG">
+    <div class="lbl">State</div>
+    <select id="su-state" class="input">
+      <option value="">Select your state</option>
+      <option>Abia</option><option>Adamawa</option><option>Akwa Ibom</option><option>Anambra</option>
+      <option>Bauchi</option><option>Bayelsa</option><option>Benue</option><option>Borno</option>
+      <option>Cross River</option><option>Delta</option><option>Ebonyi</option><option>Edo</option>
+      <option>Ekiti</option><option>Enugu</option><option>FCT</option><option>Gombe</option>
+      <option>Imo</option><option>Jigawa</option><option>Kaduna</option><option>Kano</option>
+      <option>Katsina</option><option>Kebbi</option><option>Kogi</option><option>Kwara</option>
+      <option>Lagos</option><option>Nasarawa</option><option>Niger</option><option>Ogun</option>
+      <option>Ondo</option><option>Osun</option><option>Oyo</option><option>Plateau</option>
+      <option>Rivers</option><option>Sokoto</option><option>Taraba</option><option>Yobe</option><option>Zamfara</option>
+    </select>
+    <div class="err" id="signup-err"></div>
+    <button class="btn btn-primary" onclick="handleSignupSubmit()">Create Account →</button>
+  </div>
+</div>
+
+<!-- ── DASHBOARD ───────────────────────────────────────── -->
+<div class="screen" id="dashboard">
+  <div class="sbar"><span>9:41</span><span>●●● 🔋</span></div>
+  <div class="scroll-pad">
+    <div class="dash-head">
+      <div>
+        <div class="dash-greet">Welcome back 👋</div>
+        <div class="dash-nm" id="dash-name">Abraham</div>
+      </div>
+      <div class="avatar">AE</div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats">
+      <div class="stat"><div class="stat-n g" id="dash-points">2050</div><div class="stat-l">Points</div></div>
+      <div class="stat"><div class="stat-n o" id="dash-projects">6</div><div class="stat-l">Projects</div></div>
+      <div class="stat"><div class="stat-n" id="dash-rank">#5</div><div class="stat-l">Rank</div></div>
+    </div>
+
+    <!-- Active mission banner -->
+    <div style="margin:0 16px 16px">
+      <div style="background:linear-gradient(135deg,var(--dg),var(--mg));border-radius:var(--r);padding:18px;position:relative;overflow:hidden">
+        <div style="position:absolute;right:-10px;top:-10px;font-size:80px;opacity:.15">🎯</div>
+        <div style="font-size:10px;font-weight:600;color:var(--pale);letter-spacing:.8px;text-transform:uppercase">Active Mission</div>
+        <div style="font-family:var(--fh);font-size:16px;font-weight:800;color:var(--white);margin:6px 0 10px;line-height:1.3">Waste-to-Wealth Converter</div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span class="chip chip-green">Environment</span>
+          <button class="btn btn-accent" style="width:auto;padding:8px 16px;font-size:12px" onclick="openChallenge('c1')">Continue →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Challenges -->
+    <div class="sec-hd">
+      <div class="sec-title">Available Challenges</div>
+      <div class="sec-link" onclick="showScreen('challenges');loadAllChallenges()">See all</div>
+    </div>
+    <div id="challenge-list"></div>
+  </div>
+
+  <!-- Bottom nav -->
+  <div class="bnav">
+    <div class="bnav-item active" data-screen="dashboard" onclick="showScreen('dashboard')">
+      <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      <span>Home</span>
+    </div>
+    <div class="bnav-item" data-screen="challenges" onclick="showScreen('challenges');loadAllChallenges()">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span>Missions</span>
+    </div>
+    <div class="bnav-item" data-screen="map" onclick="showScreen('map')">
+      <svg viewBox="0 0 24 24"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+      <span>Map</span>
+    </div>
+    <div class="bnav-item" data-screen="leaderboard" onclick="showScreen('leaderboard');loadLeaderboard()">
+      <svg viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+      <span>Rankings</span>
+    </div>
+    <div class="bnav-item" data-screen="profile" onclick="showScreen('profile');loadProfile()">
+      <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span>Profile</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── ALL CHALLENGES ──────────────────────────────────── -->
+<div class="screen" id="challenges">
+  <div class="sbar"><span>9:41</span><span>●●● 🔋</span></div>
+  <div class="scroll-pad">
+    <div class="ch-screen-head">
+      <div style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.6px;text-transform:uppercase;margin-bottom:4px">6 Active Missions</div>
+      <div class="ch-screen-title">Community Challenges</div>
+    </div>
+    <div style="height:16px"></div>
+    <div id="all-challenges"></div>
+  </div>
+  <div class="bnav">
+    <div class="bnav-item" data-screen="dashboard" onclick="showScreen('dashboard')"><svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>Home</span></div>
+    <div class="bnav-item active" data-screen="challenges"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span>Missions</span></div>
+    <div class="bnav-item" data-screen="map" onclick="showScreen('map')"><svg viewBox="0 0 24 24"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg><span>Map</span></div>
+    <div class="bnav-item" data-screen="leaderboard" onclick="showScreen('leaderboard');loadLeaderboard()"><svg viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg><span>Rankings</span></div>
+    <div class="bnav-item" data-screen="profile" onclick="showScreen('profile');loadProfile()"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span>Profile</span></div>
+  </div>
+</div>
+
+<!-- ── CHALLENGE DETAIL ────────────────────────────────── -->
+<div class="screen" id="challenge">
+  <div class="back" onclick="goBack('dashboard')">←</div>
+  <div id="ch-hero-bg" class="ch-hero" style="background:linear-gradient(160deg,#1a4731,#0e3020)">
+    <div id="ch-emoji" style="font-size:60px;margin-bottom:12px;z-index:1">♻️</div>
+    <span class="chip chip-green" id="ch-pillar">Environment</span>
+    <div class="ch-big" id="ch-title">Waste-to-Wealth Converter</div>
+  </div>
+  <div style="padding:20px;display:flex;flex-direction:column;gap:16px" class="scroll-pad">
+    <div class="card">
+      <div style="font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.6px;text-transform:uppercase;margin-bottom:8px">The Challenge</div>
+      <div id="ch-desc" style="font-size:14px;color:var(--white);line-height:1.7"></div>
+    </div>
+    <div class="card" style="display:flex;gap:16px">
+      <div style="flex:1;text-align:center">
+        <div style="font-size:24px;margin-bottom:4px">🏆</div>
+        <div style="font-family:var(--fh);font-size:13px;font-weight:700;color:var(--acc)">Up to 300 pts</div>
+        <div style="font-size:10px;color:var(--muted)">Points Available</div>
+      </div>
+      <div style="flex:1;text-align:center">
+        <div style="font-size:24px;margin-bottom:4px">⚡</div>
+        <div class="chip chip-orange" id="ch-diff">Medium</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px">Difficulty</div>
+      </div>
+      <div style="flex:1;text-align:center">
+        <div style="font-size:24px;margin-bottom:4px">🤖</div>
+        <div style="font-family:var(--fh);font-size:13px;font-weight:700;color:var(--lg)">AI Graded</div>
+        <div style="font-size:10px;color:var(--muted)">Evaluation</div>
+      </div>
+    </div>
+    <button class="btn btn-primary" style="padding:16px" onclick="showScreen('submission')">Start This Challenge →</button>
+    <button class="btn btn-secondary" onclick="goBack('dashboard')">Back to Dashboard</button>
+  </div>
+</div>
+
+<!-- ── SUBMISSION ──────────────────────────────────────── -->
+<div class="screen" id="submission">
+  <div class="sbar"><span>9:41</span><span>●●●</span></div>
+  <div style="background:linear-gradient(180deg,var(--dg),var(--dark));padding:40px 20px 20px">
+    <div class="back" style="position:relative;top:auto;left:auto;display:inline-flex;margin-bottom:12px" onclick="goBack('challenge')">←</div>
+    <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">Submit Your Solution</div>
+    <div style="font-family:var(--fh);font-size:20px;font-weight:800;color:var(--white);margin-top:4px">Project Submission</div>
+  </div>
+  <div style="padding:20px;display:flex;flex-direction:column;gap:14px" class="scroll-pad">
+    <div class="lbl">Project Title</div>
+    <input id="sub-title" class="input" placeholder="e.g. Community Waste App for Lafia">
+    <div class="lbl">Describe Your Solution</div>
+    <textarea id="sub-desc" class="input" rows="5" placeholder="Describe your innovation in detail. How does it work? Who does it help? How would it be implemented in your community?" style="resize:none;line-height:1.6"></textarea>
+    <div class="lbl">Your State</div>
+    <select id="sub-state" class="input">
+      <option value="">Select your state</option>
+      <option>Abia</option><option>Adamawa</option><option>Akwa Ibom</option><option>Anambra</option>
+      <option>Bauchi</option><option>Bayelsa</option><option>Benue</option><option>Borno</option>
+      <option>Cross River</option><option>Delta</option><option>Ebonyi</option><option>Edo</option>
+      <option>Ekiti</option><option>Enugu</option><option>FCT</option><option>Gombe</option>
+      <option>Imo</option><option>Jigawa</option><option>Kaduna</option><option>Kano</option>
+      <option>Katsina</option><option>Kebbi</option><option>Kogi</option><option>Kwara</option>
+      <option>Lagos</option><option selected>Nasarawa</option><option>Niger</option><option>Ogun</option>
+      <option>Ondo</option><option>Osun</option><option>Oyo</option><option>Plateau</option>
+      <option>Rivers</option><option>Sokoto</option><option>Taraba</option><option>Yobe</option><option>Zamfara</option>
+    </select>
+    <div class="card" style="display:flex;gap:12px;align-items:center">
+      <div style="font-size:28px">🤖</div>
+      <div>
+        <div style="font-family:var(--fh);font-size:13px;font-weight:700;color:var(--white)">AI-Powered Evaluation</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.5">Your project will be scored on Creativity, Feasibility & Impact. ImpactVision will predict your real-world impact.</div>
+      </div>
+    </div>
+    <div class="err" id="sub-err"></div>
+    <button id="sub-btn" class="btn btn-primary" style="padding:16px" onclick="submitProject()">Submit for AI Evaluation 🚀</button>
+  </div>
+</div>
+
+<!-- ── EVALUATING ──────────────────────────────────────── -->
+<div class="screen" id="evaluating">
+  <div class="eval-anim">🤖</div>
+  <div style="font-family:var(--fh);font-size:22px;font-weight:800;color:var(--white);margin-top:20px">Evaluating Your Project</div>
+  <div id="eval-msg" style="font-size:13px;color:var(--muted);margin-top:8px">Reading your project…</div>
+  <div class="eval-prog"><div class="eval-prog-fill" id="eval-bar"></div></div>
+  <div style="font-size:11px;color:var(--muted);margin-top:20px;line-height:1.6;max-width:260px;text-align:center">Our AI is analysing creativity, feasibility, and community impact…</div>
+</div>
+
+<!-- ── AI EVALUATION ───────────────────────────────────── -->
+<div class="screen" id="evaluation">
+  <div class="scroll-pad">
+    <div class="ev-top">
+      <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">AI Evaluation Complete</div>
+      <div class="ev-score-big" id="ev-overall">8.7</div>
+      <div style="font-size:13px;color:var(--muted);margin-top:-4px">Overall Score / 10</div>
+      <div class="pts-pill" id="ev-points" style="margin-top:10px">+250 pts</div>
+    </div>
+    <div style="padding:16px;display:flex;flex-direction:column;gap:12px">
+      <div class="card">
+        <div class="score-row"><span class="score-lbl">🎨 Creativity</span><span class="score-val" id="ev-creativity">8</span></div>
+        <div class="score-track"><div class="score-fill" id="ev-bar-creativity"></div></div>
+        <div class="score-row" style="margin-top:12px"><span class="score-lbl">⚙️ Feasibility</span><span class="score-val" id="ev-feasibility">9</span></div>
+        <div class="score-track"><div class="score-fill" id="ev-bar-feasibility"></div></div>
+        <div class="score-row" style="margin-top:12px"><span class="score-lbl">🌍 Community Impact</span><span class="score-val" id="ev-impact">9</span></div>
+        <div class="score-track"><div class="score-fill" id="ev-bar-impact"></div></div>
+      </div>
+      <div class="card">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">AI Feedback</div>
+        <div id="ev-feedback" style="font-size:13px;color:var(--white);line-height:1.7"></div>
+      </div>
+      <div style="text-align:center"><div class="badge-pill" id="ev-badge">🏆 Innovation Star</div></div>
+      <button class="btn btn-accent" onclick="showImpactVision()">View ImpactVision Prediction 🔮</button>
+      <button class="btn btn-secondary" onclick="showScreen('dashboard');loadDashboard()">Back to Dashboard</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── IMPACTVISION ────────────────────────────────────── -->
+<div class="screen" id="impactvision">
+  <div class="scroll-pad">
+    <div class="iv-header">
+      <div style="font-size:44px;margin-bottom:8px">🔮</div>
+      <div class="iv-title">ImpactVision AI</div>
+      <div class="iv-sub">Predicted Real-World Impact of Your Project</div>
+    </div>
+
+    <div style="padding:16px 0">
+      <!-- Reach -->
+      <div class="reach-card">
+        <div class="reach-lbl">Estimated Reach</div>
+        <div class="reach-num" id="iv-reach">8,000 people across 4 communities</div>
+      </div>
+
+      <!-- Environmental -->
+      <div class="iv-card">
+        <div class="iv-card-head">
+          <div><div class="iv-icon">🌿</div><div class="iv-label">Environmental Impact</div></div>
+          <div class="iv-score" id="iv-env-score">8/10</div>
+        </div>
+        <div class="score-track"><div class="score-fill" id="iv-env-bar" style="background:linear-gradient(90deg,#1a6b3a,#52b788)"></div></div>
+        <div class="iv-desc" id="iv-env-desc">Could divert significant waste from landfills, reducing pollution in affected communities.</div>
+      </div>
+
+      <!-- Economic -->
+      <div class="iv-card">
+        <div class="iv-card-head">
+          <div><div class="iv-icon">💹</div><div class="iv-label">Economic Impact</div></div>
+          <div class="iv-score" id="iv-eco-score">9/10</div>
+        </div>
+        <div class="score-track"><div class="score-fill" id="iv-eco-bar" style="background:linear-gradient(90deg,#7b3f00,#f4a261)"></div></div>
+        <div class="iv-desc" id="iv-eco-desc">Generates sustainable income for youth while reducing household waste management costs.</div>
+      </div>
+
+      <!-- Social -->
+      <div class="iv-card">
+        <div class="iv-card-head">
+          <div><div class="iv-icon">🤝</div><div class="iv-label">Social Impact</div></div>
+          <div class="iv-score" id="iv-soc-score">8/10</div>
+        </div>
+        <div class="score-track"><div class="score-fill" id="iv-soc-bar" style="background:linear-gradient(90deg,#1a3f5c,#4cc9f0)"></div></div>
+        <div class="iv-desc" id="iv-soc-desc">Builds community cohesion and positions youth as active problem-solvers rather than bystanders.</div>
+      </div>
+
+      <!-- Recommendation -->
+      <div class="rec-card">
+        <div style="font-size:11px;font-weight:600;color:var(--acc);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">AI Recommendation</div>
+        <div id="iv-rec" style="font-size:13px;color:var(--white);line-height:1.7">Partner with your local government waste management agency to pilot this in 2 wards within 3 months.</div>
+      </div>
+
+      <div style="padding:0 16px 0">
+        <button class="btn btn-primary" onclick="showScreen('map')">See Your Impact on the Map 🗺️</button>
+        <div style="height:10px"></div>
+        <button class="btn btn-secondary" onclick="showScreen('dashboard');loadDashboard()">Back to Dashboard</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── IMPACT MAP ──────────────────────────────────────── -->
+<div class="screen" id="map">
+  <div class="sbar" style="position:absolute;top:0;left:0;right:0;z-index:10;background:rgba(14,31,24,.85);backdrop-filter:blur(8px)"><span>9:41</span><span>🗺️ Innovation Map</span></div>
+  <div id="map-container" style="flex:1;width:100%"></div>
+  <div class="bnav">
+    <div class="bnav-item" data-screen="dashboard" onclick="showScreen('dashboard')"><svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>Home</span></div>
+    <div class="bnav-item" data-screen="challenges" onclick="showScreen('challenges');loadAllChallenges()"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span>Missions</span></div>
+    <div class="bnav-item active" data-screen="map"><svg viewBox="0 0 24 24"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg><span>Map</span></div>
+    <div class="bnav-item" data-screen="leaderboard" onclick="showScreen('leaderboard');loadLeaderboard()"><svg viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg><span>Rankings</span></div>
+    <div class="bnav-item" data-screen="profile" onclick="showScreen('profile');loadProfile()"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span>Profile</span></div>
+  </div>
+</div>
+
+<!-- ── LEADERBOARD ─────────────────────────────────────── -->
+<div class="screen" id="leaderboard">
+  <div class="sbar"><span>9:41</span><span>●●●</span></div>
+  <div class="scroll-pad">
+    <div class="lb-hero">
+      <div style="font-size:44px;margin-bottom:8px">🏆</div>
+      <div class="lb-title">Innovation Rankings</div>
+      <div class="lb-sub">National Leaderboard · March 2026</div>
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
+        <span class="chip chip-green">National</span>
+        <span class="chip chip-orange">Nasarawa State</span>
+      </div>
+    </div>
+    <div id="lb-list"></div>
+  </div>
+  <div class="bnav">
+    <div class="bnav-item" data-screen="dashboard" onclick="showScreen('dashboard')"><svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>Home</span></div>
+    <div class="bnav-item" data-screen="challenges" onclick="showScreen('challenges');loadAllChallenges()"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span>Missions</span></div>
+    <div class="bnav-item" data-screen="map" onclick="showScreen('map')"><svg viewBox="0 0 24 24"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg><span>Map</span></div>
+    <div class="bnav-item active" data-screen="leaderboard"><svg viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg><span>Rankings</span></div>
+    <div class="bnav-item" data-screen="profile" onclick="showScreen('profile');loadProfile()"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span>Profile</span></div>
+  </div>
+</div>
+
+<!-- ── PROFILE ─────────────────────────────────────────── -->
+<div class="screen" id="profile">
+  <div class="scroll-pad">
+    <div class="prof-hero">
+      <div class="prof-avatar-big" id="prof-avatar">AE</div>
+      <div class="prof-name" id="prof-name">Abraham Emmanuel</div>
+      <div class="prof-state" id="prof-state">📍 Nasarawa State</div>
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
+        <span class="chip chip-green">🏆 Rank #5</span>
+        <span class="chip chip-orange">⭐ 2,050 pts</span>
+      </div>
+    </div>
+    <div class="prof-body">
+      <div class="prof-row"><span class="prof-row-label">🏫 School</span><span class="prof-row-val" id="prof-school">KASU Kaduna</span></div>
+      <div class="prof-row"><span class="prof-row-label">📋 Projects Submitted</span><span class="prof-row-val" id="prof-projects">6</span></div>
+      <div class="prof-row"><span class="prof-row-label">⭐ Total Points</span><span class="prof-row-val" id="prof-points">2,050</span></div>
+      <div class="prof-row"><span class="prof-row-label">🎯 Active Challenges</span><span class="prof-row-val">3</span></div>
+      <div class="prof-row"><span class="prof-row-label">🏆 Best Badge</span><span class="prof-row-val">Community Champion</span></div>
+      <button class="btn btn-secondary" style="margin-top:8px" onclick="doLogout()">Sign Out</button>
+    </div>
+  </div>
+  <div class="bnav">
+    <div class="bnav-item" data-screen="dashboard" onclick="showScreen('dashboard')"><svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>Home</span></div>
+    <div class="bnav-item" data-screen="challenges" onclick="showScreen('challenges');loadAllChallenges()"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span>Missions</span></div>
+    <div class="bnav-item" data-screen="map" onclick="showScreen('map')"><svg viewBox="0 0 24 24"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg><span>Map</span></div>
+    <div class="bnav-item" data-screen="leaderboard" onclick="showScreen('leaderboard');loadLeaderboard()"><svg viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg><span>Rankings</span></div>
+    <div class="bnav-item active" data-screen="profile"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span>Profile</span></div>
+  </div>
+</div>
+
+</div><!-- /phone -->
+
+<script>
+// Profile loader
+window.loadProfile = function() {
+  const u = window.getDemoUser ? getDemoUser() : {};
+  const name = u.name || "Abraham Emmanuel";
+  const initials = name.split(" ").map(n=>n[0]).join("").substring(0,2).toUpperCase();
+  const el = id => document.getElementById(id);
+  if(el("prof-avatar")) el("prof-avatar").textContent = initials;
+  if(el("prof-name"))   el("prof-name").textContent   = name;
+  if(el("prof-state"))  el("prof-state").textContent  = "📍 " + (u.state || "Nasarawa State");
+  if(el("prof-school")) el("prof-school").textContent = u.school || "KASU";
+  if(el("prof-projects")) el("prof-projects").textContent = u.projects || 6;
+  if(el("prof-points"))   el("prof-points").textContent   = (u.points || 2050).toLocaleString();
+};
+</script>
+</body>
+</html>
